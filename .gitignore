@@ -1,0 +1,12 @@
+# Собранный сайт GitHub Pages (артефакт CI)
+site/
+
+# Python / UV
+.venv/
+__pycache__/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Локальная сборка LikeC4 (проверка перед push)
+likec4/dist/

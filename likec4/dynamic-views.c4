@@ -1,0 +1,187 @@
+views {
+  global style contours
+
+  dynamic view smart-assistant--plan-trip--dynamic {
+    title 'Умный помощник / Динамическая диаграмма планирования поездки'
+    description """
+      ## Планирование поездки
+
+      Сценарий показывает фиксированный Supervisor-граф. Поиски транспорта и
+      гостиниц **логически параллельны**: стрелки сериализованы только потому,
+      что последовательностная диаграмма показывает один линейный порядок сообщений. Каждый
+      результат проходит Schema & Loop Guard до записи в Trip Dossier.
+
+      Booking Executor доступен исключительно в ветке с явным подтверждением
+      `SelectedItinerary`. При `policy_not_found` бронирование заблокировано:
+      Supervisor запрашивает уточнение у сотрудника или направляет кейс
+      ответственному сотруднику; вызова Booking Executor в этой ветке нет.
+    """
+    variant sequence
+
+    include
+      employee,
+      hrSystem,
+      smartAssistant,
+      smartAssistant.chatApi,
+      smartAssistant.orchestrator,
+      smartAssistant.orchestrator.supervisor,
+      smartAssistant.orchestrator.policyAgent,
+      smartAssistant.orchestrator.schemaGuard,
+      smartAssistant.orchestrator.dossier,
+      smartAssistant.orchestrator.transportAgent,
+      smartAssistant.orchestrator.hotelAgent,
+      smartAssistant.orchestrator.budgetAgent,
+      smartAssistant.orchestrator.bookingExecutor,
+      smartAssistant.ragService,
+      smartAssistant.llmService,
+      travelProviders
+
+    employee -> smartAssistant.chatApi 'Отправить TripRequest на естественном языке'
+    smartAssistant.chatApi -> smartAssistant.orchestrator.supervisor 'Передать аутентифицированный TripRequest'
+    smartAssistant.orchestrator.supervisor -> hrSystem 'Запросить EmployeeContext'
+    hrSystem -> smartAssistant.orchestrator.supervisor 'Вернуть EmployeeContext'
+    smartAssistant.orchestrator.supervisor -> smartAssistant.orchestrator.policyAgent 'Получить PolicyConstraints для TripRequest с учётом EmployeeContext'
+    smartAssistant.orchestrator.policyAgent -> smartAssistant.ragService 'Найти применимые фрагменты политики по запросу и фильтрам'
+
+    alt {
+      when 'релевантные фрагменты найдены' {
+        smartAssistant.ragService -> smartAssistant.orchestrator.policyAgent 'Вернуть top 3–5 релевантных фрагментов с цитатами'
+        smartAssistant.orchestrator.policyAgent -> smartAssistant.llmService 'Извлечь структурированные PolicyConstraints только из контекста'
+        smartAssistant.llmService -> smartAssistant.orchestrator.policyAgent 'Вернуть PolicyConstraints с цитатами'
+        smartAssistant.orchestrator.policyAgent -> smartAssistant.orchestrator.schemaGuard 'Проверить PolicyConstraints'
+        smartAssistant.orchestrator.schemaGuard -> smartAssistant.orchestrator.dossier 'Сохранить policy_constraints'
+        smartAssistant.orchestrator.supervisor -> smartAssistant.orchestrator.transportAgent 'Найти варианты транспорта'
+        smartAssistant.orchestrator.transportAgent -> travelProviders 'Выполнить поиск транспорта без бронирования'
+        travelProviders -> smartAssistant.orchestrator.transportAgent 'Вернуть TransportOffers'
+        smartAssistant.orchestrator.transportAgent -> smartAssistant.orchestrator.schemaGuard 'Проверить TransportOffers'
+        smartAssistant.orchestrator.schemaGuard -> smartAssistant.orchestrator.dossier 'Сохранить transport_offers'
+        smartAssistant.orchestrator.supervisor -> smartAssistant.orchestrator.hotelAgent 'Найти варианты проживания'
+        smartAssistant.orchestrator.hotelAgent -> travelProviders 'Выполнить поиск гостиниц без бронирования'
+        travelProviders -> smartAssistant.orchestrator.hotelAgent 'Вернуть HotelOffers'
+        smartAssistant.orchestrator.hotelAgent -> smartAssistant.orchestrator.schemaGuard 'Проверить HotelOffers'
+        smartAssistant.orchestrator.schemaGuard -> smartAssistant.orchestrator.dossier 'Сохранить hotel_offers'
+        smartAssistant.orchestrator.supervisor -> smartAssistant.orchestrator.budgetAgent 'Рассчитать бюджет и соответствие политике по Trip Dossier'
+        smartAssistant.orchestrator.budgetAgent -> smartAssistant.orchestrator.schemaGuard 'Проверить BudgetEvaluation'
+        smartAssistant.orchestrator.schemaGuard -> smartAssistant.orchestrator.dossier 'Сохранить budget_evaluation'
+        smartAssistant.orchestrator.supervisor -> smartAssistant.chatApi 'Вернуть 2–3 допустимых маршрута с цитатами'
+        smartAssistant.chatApi -> employee 'Показать варианты и общую стоимость'
+
+        alt {
+          when 'сотрудник подтвердил SelectedItinerary' {
+            employee -> smartAssistant.chatApi 'Подтвердить SelectedItinerary'
+            smartAssistant.chatApi -> smartAssistant.orchestrator.supervisor 'Передать подтверждённый SelectedItinerary'
+            smartAssistant.orchestrator.supervisor -> smartAssistant.orchestrator.bookingExecutor 'Передать подтверждённый SelectedItinerary для бронирования'
+            smartAssistant.orchestrator.bookingExecutor -> travelProviders 'Забронировать SelectedItinerary'
+            travelProviders -> smartAssistant.orchestrator.bookingExecutor 'Вернуть подтверждение бронирования'
+            smartAssistant.orchestrator.bookingExecutor -> smartAssistant.orchestrator.supervisor 'Вернуть подтверждение бронирования'
+            smartAssistant.orchestrator.supervisor -> smartAssistant.chatApi 'Вернуть подтверждение бронирования'
+            smartAssistant.chatApi -> employee 'Показать подтверждение бронирования'
+          }
+          else 'вариант изменён или сотрудник отказался от подтверждения' {
+            employee -> smartAssistant.chatApi 'Изменить SelectedItinerary или отказаться от подтверждения'
+            smartAssistant.chatApi -> smartAssistant.orchestrator.supervisor 'Передать изменение или отказ без запуска бронирования'
+          }
+        }
+      }
+      else 'policy_not_found' {
+        smartAssistant.ragService -> smartAssistant.orchestrator.policyAgent 'Вернуть результат policy_not_found'
+        smartAssistant.orchestrator.policyAgent -> smartAssistant.orchestrator.supervisor 'Сообщить об отсутствии применимой политики'
+        smartAssistant.orchestrator.supervisor -> smartAssistant.chatApi 'Запросить уточнение или направить ответственному сотруднику'
+        smartAssistant.chatApi -> employee 'Сообщить о необходимости уточнения без выполнения бронирования'
+      }
+    }
+  }
+
+  dynamic view smart-assistant--policy-ingestion--dynamic {
+    title 'Умный помощник / Динамическая диаграмма подготовки индексов Policy RAG'
+    description """
+      ## Подготовка индексов политик
+
+      Самостоятельный асинхронный процесс по расписанию проверяет опубликованные
+      версии политик и запускает обработку при обнаружении изменений. Он не
+      является частью онлайн-сценария планирования поездки и может выполняться
+      параллельно с ним.
+
+      Для каждого фрагмента сохраняются метаданные: `policy_id`, `policy_version`,
+      `effective_from`, `effective_to`, `country`, `employee_grade`,
+      `access_scope`, `section_path`, `source_url`, `chunk_id` и порядковый
+      номер. Структурные рекурсивные фрагменты имеют 500–800 токенов и перекрытие
+      10–15%, поэтому сохраняют смысл заголовков, списков и таблиц.
+
+      Embedding-модель является внутренней зависимостью Python-сервиса, поэтому
+      её вызов показан как self-взаимодействие. Идентификатор и версия модели
+      фиксируются вместе с версией индекса, чтобы поиск использовал совместимое
+      векторное пространство.
+
+      FAISS допустим только для объяснения прототипа в Colab; целевые хранилища
+      — Qdrant для векторов и OpenSearch/BM25 для лексического индекса.
+    """
+    variant sequence
+
+    include
+      policyRepository,
+      smartAssistant,
+      smartAssistant.policyIngestion,
+      smartAssistant.vectorDb,
+      smartAssistant.lexicalIndex
+
+    smartAssistant.policyIngestion -> policyRepository 'Запросить версии политик, изменённые после последней синхронизации'
+    policyRepository -> smartAssistant.policyIngestion 'Вернуть изменённые версии политик'
+    smartAssistant.policyIngestion -> smartAssistant.policyIngestion 'Разобрать заголовки, списки и таблицы'
+    smartAssistant.policyIngestion -> smartAssistant.policyIngestion 'Сформировать структурные фрагменты 500–800 токенов с перекрытием 10–15%'
+    smartAssistant.policyIngestion -> smartAssistant.policyIngestion 'Вычислить мультиязычные эмбеддинги фрагментов'
+    smartAssistant.policyIngestion -> smartAssistant.vectorDb 'Сохранить фрагменты, векторы и метаданные'
+    smartAssistant.policyIngestion -> smartAssistant.lexicalIndex 'Проиндексировать тексты фрагментов и метаданные'
+  }
+
+  dynamic view smart-assistant--policy-rag--dynamic {
+    title 'Умный помощник / Динамическая диаграмма гибридного поиска Policy RAG'
+    description """
+      ## Гибридный поиск в Policy RAG
+
+      Техническая детализация одного шага сценария «Планирование поездки»:
+      Policy Agent запрашивает применимые фрагменты политики, а Policy RAG
+      Service возвращает top 3–5 цитируемых фрагментов либо `policy_not_found`.
+      Извлечение и применение PolicyConstraints остаются на родительской
+      диаграмме планирования поездки.
+
+      Гибридный поиск объединяет векторные и BM25-результаты после фильтрации по
+      метаданным и ACL. Мультиязычный векторный поиск помогает русским
+      формулировкам и перефразам, а BM25 сохраняет точные термины, отрицания,
+      лимиты и коды политики. RRF объединяет кандидатов до переранжирования
+      CrossEncoder-моделью.
+
+      Embedding-модель является внутренней зависимостью Python-сервиса, поэтому
+      её вызов показан как self-взаимодействие. Для запроса используется та же
+      модель и версия, которыми построен активный векторный индекс. Для
+      внутренних правил внешний поиск в сети запрещён.
+    """
+    variant sequence
+
+    include
+      smartAssistant,
+      smartAssistant.orchestrator,
+      smartAssistant.orchestrator.policyAgent,
+      smartAssistant.ragService,
+      smartAssistant.vectorDb,
+      smartAssistant.lexicalIndex
+
+    smartAssistant.orchestrator.policyAgent -> smartAssistant.ragService 'Найти применимые фрагменты политики по запросу и фильтрам'
+    smartAssistant.ragService -> smartAssistant.ragService 'Вычислить эмбеддинг запроса той же моделью, что использовалась при индексации фрагментов'
+    smartAssistant.ragService -> smartAssistant.vectorDb 'Выполнить векторный поиск top 10–20 по вектору запроса и фильтрам метаданных'
+    smartAssistant.vectorDb -> smartAssistant.ragService 'Вернуть векторных кандидатов с оценками релевантности'
+    smartAssistant.ragService -> smartAssistant.lexicalIndex 'Выполнить BM25-поиск top 10–20 по тексту запроса и фильтрам метаданных'
+    smartAssistant.lexicalIndex -> smartAssistant.ragService 'Вернуть BM25-кандидатов с оценками релевантности'
+    smartAssistant.ragService -> smartAssistant.ragService 'Объединить векторных и BM25-кандидатов методом Reciprocal Rank Fusion (RRF)'
+    smartAssistant.ragService -> smartAssistant.ragService 'Переранжировать кандидатов CrossEncoder-моделью'
+
+    alt {
+      when 'релевантные фрагменты проходят порог' {
+        smartAssistant.ragService -> smartAssistant.orchestrator.policyAgent 'Вернуть top 3–5 релевантных фрагментов с цитатами'
+      }
+      else 'релевантные фрагменты не проходят порог' {
+        smartAssistant.ragService -> smartAssistant.orchestrator.policyAgent 'Вернуть результат policy_not_found без обращения к внешнему поиску'
+      }
+    }
+  }
+}

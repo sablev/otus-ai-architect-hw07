@@ -1,0 +1,15 @@
+[project]
+name = "smart-trip-assistant"
+version = "0.1.0"
+description = "Minimal LangGraph prototype for HW07"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "langgraph==1.2.11",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7,<8",
+    "jupyterlab>=4,<5",
+    "nbconvert>=7,<8",
+]

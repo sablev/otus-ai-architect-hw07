@@ -1,0 +1,16 @@
+services:
+  likec4:
+    image: likec4/likec4:1.59.2
+    container_name: hw07-likec4
+    init: true
+    command: start --listen 0.0.0.0 --port 5173 /data
+    working_dir: /data
+    ports:
+      - "5174:5173"
+      - "24679:24678"
+    environment:
+      CHOKIDAR_USEPOLLING: "1"
+      CHOKIDAR_INTERVAL: "200"
+    volumes:
+      - ./:/data
+    restart: unless-stopped

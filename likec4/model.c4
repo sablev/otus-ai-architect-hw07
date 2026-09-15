@@ -1,0 +1,168 @@
+model {
+  person employee {
+    title 'Сотрудник'
+    description 'Оформляет командировку, выбирает предложенный вариант и подтверждает бронирование'
+  }
+
+  system hrSystem {
+    #external
+    title 'HR-система'
+    description 'Хранит подразделение, категорию сотрудника и доступные центры затрат'
+    style { color muted }
+  }
+
+  system policyRepository {
+    #external
+    title 'Корпоративный репозиторий документов'
+    description 'Публикует версии положений о командировках, лимитов и правил согласования'
+    style { color muted }
+  }
+
+  system travelProviders {
+    #external
+    title 'Travel-провайдеры'
+    description 'Возвращают предложения транспорта и гостиниц; после подтверждения принимают запрос бронирования'
+    style { color muted }
+  }
+
+  system approvalSystem {
+    #external
+    title 'Система согласований'
+    description 'Принимает заявки на согласование отклонений от корпоративной политики'
+    style { color muted }
+  }
+
+  system smartAssistant {
+    title 'Умный помощник'
+    description 'Собирает параметры поездки, применяет корпоративную политику, подбирает допустимые варианты и выполняет подтверждённое бронирование'
+
+    container chatApi {
+      #online
+      title 'Assistant API'
+      icon tech:python
+      technology 'Python, FastAPI'
+      description 'Принимает запросы сотрудника, аутентифицирует сессию и передаёт управление агентному графу'
+    }
+    container orchestrator {
+      #online
+      title 'Agent Orchestrator'
+      icon tech:python
+      technology 'Python, LangGraph'
+      description 'Выполняет детерминированный граф Supervisor, изолирует контекст агентов-исполнителей и ведёт Trip Dossier'
+    }
+    container ragService {
+      #online
+      title 'Policy RAG Service'
+      icon tech:python
+      technology 'Python'
+      description 'Применяет фильтрацию по метаданным, векторный и BM25-поиск, RRF и переранжирование моделью CrossEncoder'
+    }
+    container policyIngestion {
+      #async
+      title 'Policy Ingestion Worker'
+      icon tech:python
+      technology 'Python'
+      description 'Разбирает версии политик, режет их на фрагменты по структуре разделов и обновляет оба поисковых индекса'
+    }
+    container llmService {
+      #online
+      title 'LLM Inference Service'
+      technology 'OpenAI-compatible API'
+      description 'Понимает запрос, извлекает PolicyConstraints и формирует ответы строго по найденному контексту'
+    }
+    database tripStore {
+      title 'Trip State Store'
+      icon tech:postgresql
+      technology 'PostgreSQL'
+      description 'Хранит Trip Dossier, статусы подтверждения и структурированные ошибки процесса'
+    }
+    database vectorDb {
+      #knowledge
+      title 'Policy Vector DB'
+      icon tech:qdrant
+      technology 'Qdrant'
+      description 'Хранит мультиязычные эмбеддинги, метаданные, версии и ссылки на разделы политик'
+    }
+    database lexicalIndex {
+      #knowledge
+      title 'Policy BM25 Index'
+      icon tech:opensearch
+      technology 'OpenSearch'
+      description 'Обеспечивает лексический поиск точных терминов, отрицаний, лимитов и кодов политик'
+    }
+
+    employee -> chatApi {
+      title 'Отправляет параметры поездки и подтверждает вариант'
+      technology 'HTTPS'
+    }
+    chatApi -> orchestrator {
+      title 'Передаёт аутентифицированный запрос'
+      technology 'In-process call'
+    }
+    orchestrator -> hrSystem {
+      title 'Получает контекст сотрудника и центр затрат'
+      technology 'HTTPS API'
+    }
+    orchestrator -> ragService {
+      title 'Запрашивает применимые PolicyConstraints'
+      technology 'In-process call'
+    }
+    orchestrator -> llmService {
+      title 'Передаёт задачу и найденный контекст для ответа с опорой на него'
+      technology 'HTTP, OpenAI-compatible API'
+    }
+    orchestrator -> tripStore {
+      title 'Сохраняет Trip Dossier, статусы и ошибки процесса'
+      technology 'SQL'
+    }
+    orchestrator -> travelProviders {
+      title 'Ищет варианты только для чтения; бронирует вариант лишь после подтверждения'
+      technology 'HTTPS API'
+    }
+    orchestrator -> approvalSystem {
+      title 'Передаёт отклонение политики на согласование'
+      technology 'HTTPS API'
+    }
+    ragService -> vectorDb {
+      title 'Получает векторных кандидатов; объединяет оба списка через RRF до переранжирования'
+      technology 'gRPC'
+    }
+    ragService -> lexicalIndex {
+      title 'Получает BM25-кандидатов; объединяет оба списка через RRF до переранжирования'
+      technology 'HTTPS'
+    }
+    policyIngestion -> policyRepository {
+      title 'Забирает опубликованные версии политик'
+      technology 'HTTPS'
+    }
+    policyIngestion -> vectorDb {
+      title 'Обновляет эмбеддинги и метаданные версий'
+      technology 'gRPC'
+    }
+    policyIngestion -> lexicalIndex {
+      title 'Обновляет BM25-индекс структурных фрагментов'
+      technology 'HTTPS'
+    }
+  }
+
+  employee -> smartAssistant {
+    title 'Описывает поездку, выбирает и подтверждает вариант'
+    technology 'HTTPS'
+  }
+  smartAssistant -> hrSystem {
+    title 'Получает контекст сотрудника'
+    technology 'HTTPS'
+  }
+  smartAssistant -> policyRepository {
+    title 'Получает опубликованные версии политик'
+    technology 'HTTPS'
+  }
+  smartAssistant -> travelProviders {
+    title 'Ищет предложения и бронирует подтверждённый вариант'
+    technology 'HTTPS API'
+  }
+  smartAssistant -> approvalSystem {
+    title 'Передаёт отклонение на согласование'
+    technology 'HTTPS API'
+  }
+}

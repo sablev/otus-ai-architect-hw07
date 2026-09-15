@@ -1,0 +1,21 @@
+specification {
+  element person { style { shape person } }
+  element system
+  element container
+  element component
+  element database { style { shape storage } }
+  tag external
+  tag online
+  tag async
+  tag knowledge
+  tag guarded
+}
+
+global {
+  styleGroup contours {
+    style element.tag = #online { color green }
+    style element.tag = #async { color amber }
+    style element.tag = #knowledge { color blue }
+    style element.tag = #guarded { color red }
+  }
+}

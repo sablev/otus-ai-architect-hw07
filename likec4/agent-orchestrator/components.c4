@@ -1,0 +1,141 @@
+model {
+  extend smartAssistant.orchestrator {
+    component supervisor {
+      #online
+      title 'Trip Supervisor'
+      description 'Ведёт фиксированный граф процесса, запрашивает недостающие параметры и выбирает следующий узел'
+    }
+    component dossier {
+      title 'Trip Dossier Manager'
+      description 'Читает и обновляет типизированные секции общего состояния без передачи полной истории агентам'
+    }
+    component policyAgent {
+      #online
+      title 'Policy Agent'
+      description 'Получает подтверждённые ограничения и цитаты через Policy RAG Service'
+    }
+    component transportAgent {
+      #online
+      title 'Transport Search Agent'
+      description 'Ищет и нормализует варианты транспорта по маршруту, датам и ограничениям'
+    }
+    component hotelAgent {
+      #online
+      title 'Hotel Search Agent'
+      description 'Ищет и нормализует варианты проживания по месту, датам и лимиту'
+    }
+    component budgetAgent {
+      #online
+      title 'Budget & Compliance Agent'
+      description 'Детерминированно рассчитывает стоимость и отмечает нарушения PolicyConstraints'
+    }
+    component schemaGuard {
+      title 'Schema & Loop Guard'
+      description 'Проверяет схемы результатов, retry_count и глобальный recursion_limit'
+    }
+    component bookingExecutor {
+      #guarded
+      title 'Booking Executor'
+      description 'После явного подтверждения отправляет идемпотентный запрос бронирования по выбранным offer_id'
+    }
+
+    smartAssistant.chatApi -> supervisor {
+      title 'Передаёт TripRequest'
+      technology 'In-process call'
+    }
+    supervisor -> hrSystem {
+      title 'Получает контекст сотрудника для TripRequest'
+      technology 'HTTPS API'
+    }
+    supervisor -> policyAgent {
+      title 'Делегирует получение PolicyConstraints'
+      technology 'In-process call'
+    }
+    supervisor -> transportAgent {
+      title 'Делегирует поиск TransportOffers'
+      technology 'In-process call'
+    }
+    supervisor -> hotelAgent {
+      title 'Делегирует поиск HotelOffers'
+      technology 'In-process call'
+    }
+    supervisor -> budgetAgent {
+      title 'Делегирует расчёт BudgetEvaluation'
+      technology 'In-process call'
+    }
+    supervisor -> bookingExecutor {
+      title 'Передаёт SelectedItinerary только после явного подтверждения'
+      technology 'In-process call'
+    }
+    supervisor -> dossier {
+      title 'Читает TripRequest, PolicyConstraints и SelectedItinerary текущего процесса'
+      technology 'In-process call'
+    }
+    supervisor -> approvalSystem {
+      title 'Передаёт отклонение PolicyConstraints на явное согласование'
+      technology 'HTTPS API'
+    }
+
+    dossier -> policyAgent {
+      title 'Предоставляет типизированную секцию TripRequest'
+      technology 'In-process call'
+    }
+    dossier -> transportAgent {
+      title 'Предоставляет TripRequest и PolicyConstraints'
+      technology 'In-process call'
+    }
+    dossier -> hotelAgent {
+      title 'Предоставляет TripRequest и PolicyConstraints'
+      technology 'In-process call'
+    }
+    dossier -> budgetAgent {
+      title 'Предоставляет TransportOffers, HotelOffers и PolicyConstraints'
+      technology 'In-process call'
+    }
+    policyAgent -> schemaGuard {
+      title 'Передаёт PolicyConstraints для проверки схемы и retry_count'
+      technology 'In-process call'
+    }
+    transportAgent -> schemaGuard {
+      title 'Передаёт TransportOffers для проверки схемы и retry_count'
+      technology 'In-process call'
+    }
+    hotelAgent -> schemaGuard {
+      title 'Передаёт HotelOffers для проверки схемы и retry_count'
+      technology 'In-process call'
+    }
+    budgetAgent -> schemaGuard {
+      title 'Передаёт BudgetEvaluation для проверки схемы и retry_count'
+      technology 'In-process call'
+    }
+    schemaGuard -> dossier {
+      title 'Записывает валидные PolicyConstraints, TransportOffers, HotelOffers и BudgetEvaluation'
+      technology 'In-process call'
+    }
+    dossier -> smartAssistant.tripStore {
+      title 'Сохраняет типизированный Trip Dossier и SelectedItinerary'
+      technology 'SQL'
+    }
+
+    policyAgent -> smartAssistant.ragService {
+      title 'Запрашивает цитаты для PolicyConstraints'
+      technology 'In-process call'
+    }
+    policyAgent -> smartAssistant.llmService {
+      title 'Извлекает PolicyConstraints из цитат'
+      technology 'HTTP, OpenAI-compatible API'
+    }
+    transportAgent -> travelProviders {
+      title 'Ищет TransportOffers без бронирования'
+      technology 'HTTPS API'
+    }
+    hotelAgent -> travelProviders {
+      title 'Ищет HotelOffers без бронирования'
+      technology 'HTTPS API'
+    }
+    bookingExecutor -> travelProviders {
+      title 'Бронирует SelectedItinerary по выбранным offer_id'
+      technology 'HTTPS API'
+    }
+  }
+}

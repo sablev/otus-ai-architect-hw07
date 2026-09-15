@@ -1,0 +1,71 @@
+views {
+  global style contours
+
+  view smart-assistant--agent-orchestrator--components of smartAssistant.orchestrator {
+    title 'Умный помощник / Agent Orchestrator / Диаграмма компонентов'
+    description """
+      ### 1. Описание
+
+      Диаграмма компонентов (C3) раскрывает только внутренности Agent
+      Orchestrator. Trip Supervisor ведёт детерминированный фиксированный граф,
+      а не свободный ReAct-цикл: следующий узел выбирается по состоянию Trip
+      Dossier, `retry_count` и глобальному `recursion_limit`. Каждый агент
+      следует Single Responsibility: Policy Agent получает ограничения, поисковые
+      агенты нормализуют свои предложения, а Budget & Compliance Agent выполняет
+      детерминированную арифметику и фиксирует нарушения PolicyConstraints.
+
+      Trip Dossier реализует Blackboard с изоляцией контекста: агент читает
+      только нужную типизированную секцию и записывает результат только через
+      Schema & Loop Guard, не получая полную историю. Schema & Loop Guard
+      валидирует схему, учитывает `retry_count` и останавливает граф по
+      `recursion_limit`. Booking Executor вызывается только после явного
+      подтверждения сотрудника; он отправляет идемпотентное бронирование по
+      выбранным offer_id.
+
+      ### 2. Обработка ошибок
+
+      | Случай | Детерминированный следующий шаг |
+      |---|---|
+      | Не хватает полей TripRequest | Supervisor запрашивает конкретные недостающие поля у сотрудника и не запускает агентов-исполнителей |
+      | `policy_not_found` | Supervisor фиксирует ошибку в Trip Dossier и сообщает сотруднику, что требуется политика или ручное уточнение |
+      | Тайм-аут провайдера | Schema & Loop Guard увеличивает `retry_count`; Supervisor выполняет ровно одну ограниченную повторную попытку этого поиска, затем возвращает частичный результат |
+      | Нет предложений в лимите | Budget & Compliance Agent записывает BudgetEvaluation; Supervisor предлагает изменить параметры или оформить явное отклонение |
+      | Некорректная схема результата агента-исполнителя | Schema & Loop Guard проверяет схему и увеличивает `retry_count`; Supervisor выполняет ровно одну повторную попытку узла с повторной проверкой схемы; при повторном нарушении фиксирует структурированную ошибку в Trip Dossier и останавливает этот узел |
+      | Исчерпан `recursion_limit` | Schema & Loop Guard останавливает граф, сохраняет состояние и возвращает сотруднику структурированную ошибку |
+      | Нет явного подтверждения сотрудника | Supervisor сохраняет SelectedItinerary и ожидает подтверждения; Booking Executor не вызывается |
+
+      ### 3. Участники
+
+      | Участник | Ответственность |
+      |---|---|
+      | Assistant API | Передаёт аутентифицированный TripRequest в Supervisor |
+      | Trip Supervisor | Ведёт фиксированный граф и выбирает следующий разрешённый узел |
+      | Trip Dossier Manager | Изолирует типизированные секции общего состояния |
+      | Policy Agent | Получает PolicyConstraints и цитаты политики |
+      | Transport Search Agent | Находит и нормализует TransportOffers |
+      | Hotel Search Agent | Находит и нормализует HotelOffers |
+      | Budget & Compliance Agent | Детерминированно формирует BudgetEvaluation |
+      | Schema & Loop Guard | Валидирует результаты и применяет лимиты повторов и графа |
+      | Booking Executor | После подтверждения бронирует SelectedItinerary |
+
+      **Легенда**
+
+      | | |
+      |---|---|
+      | 🟩 | Зелёный: онлайн-компонент |
+      | 🟥 | Красный: защищённое действие после подтверждения |
+      | ⬜ | Приглушённый: внешняя система или соседний контейнер |
+
+      Поисковые хранилища политик и контур их загрузки намеренно не показаны:
+      они остаются за границей Policy RAG Service.
+      """
+    autoLayout LeftRight
+
+    style smartAssistant.orchestrator {
+      color muted
+      opacity 0%
+    }
+
+    include *, smartAssistant.chatApi, smartAssistant.ragService, smartAssistant.llmService, smartAssistant.tripStore, hrSystem, travelProviders, approvalSystem
+  }
+}

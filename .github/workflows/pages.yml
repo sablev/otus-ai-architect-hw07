@@ -1,0 +1,50 @@
+name: Build and deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Сайт отдаётся из подкаталога /<имя репозитория>/, поэтому --base
+      # вычисляется из GITHUB_REPOSITORY, а не зашит литералом.
+      # --use-hash-history: маршруты вида /#/view/<id> не уходят на сервер,
+      # иначе прямые ссылки на представления получали бы HTTP 404
+      # (GitHub Pages отдаёт SPA-оболочку через 404.html со статусом 404).
+      # Монтируется сам каталог модели: при монтировании всего workspace
+      # CLI считает outDir относительно vite-root внутри образа, и сборка
+      # падает с ENOENT на scandir выходного каталога.
+      - name: Build LikeC4 static site
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE/likec4:/data" \
+            likec4/likec4:1.59.2 \
+            build --base "/${GITHUB_REPOSITORY#*/}/" --use-hash-history \
+            -o /data/dist
+          sudo mv likec4/dist site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
